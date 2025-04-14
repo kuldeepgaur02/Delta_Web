@@ -1,4 +1,4 @@
-const Device = require('../models/Device');
+const Device = require('../models/device');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const ErrorResponse = require('../utils/errorResponse');
 const plcService = require('../services/plcService');

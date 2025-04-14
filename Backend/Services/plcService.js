@@ -1,7 +1,7 @@
 const ModbusRTU = require('modbus-serial');
 const config = require('config');
 const { logger } = require('../utils/logger');
-const Device = require('../models/Device');
+const Device = require('../models/device');
 
 // Store active PLC connections
 const activeConnections = new Map();
