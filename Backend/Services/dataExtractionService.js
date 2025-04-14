@@ -1,4 +1,4 @@
-const DataPoint = require('../models/DataPoint');
+const DataPoint = require('../Models/datapoint');
 const plcService = require('./plcService');
 const { logger } = require('../utils/logger');
 
