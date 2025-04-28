@@ -1,5 +1,5 @@
-const Telemetry = require('../models/telemetry');
-const Device = require('../models/device');
+const Telemetry = require('../Models/telemetry');
+const Device = require('../Models/device');
 const logger = require('../utils/logger');
 const { EventEmitter } = require('events');
 

@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const Device = require('../models/device');
 const authMiddleware = require('../middleware/auth');
 const deviceService = require('../services/deviceService');
 const logger = require('../utils/logger');
