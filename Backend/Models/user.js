@@ -1,93 +1,120 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcrypt');
+const config = require('../config/default');
 
-const DeviceSchema = new mongoose.Schema({
-  name: {
+const UserSchema = new mongoose.Schema({
+  username: {
     type: String,
-    required: [true, 'Please add a device name'],
+    required: true,
+    unique: true,
     trim: true,
-    maxlength: [100, 'Name cannot be more than 100 characters']
+    minlength: 3
   },
-  ipAddress: {
+  email: {
     type: String,
-    required: [true, 'Please add an IP address'],
-    match: [/^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/, 'Please add a valid IP address']
-  },
-  port: {
-    type: Number,
-    required: [true, 'Please add a port number'],
-    default: 502, // Default Modbus TCP port
-    min: [1, 'Port must be at least 1'],
-    max: [65535, 'Port must be at most 65535']
-  },
-  type: {
-    type: String,
-    enum: ['water_treatment', 'hvac', 'manufacturing', 'energy', 'other'],
-    required: [true, 'Please specify the PLC application type']
-  },
-  description: {
-    type: String,
+    required: true,
+    unique: true,
     trim: true,
-    maxlength: [500, 'Description cannot be more than 500 characters']
+    lowercase: true,
+    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email address']
   },
-  location: {
+  password: {
+    type: String,
+    required: true,
+    minlength: 6
+  },
+  firstName: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  lastName: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  role: {
+    type: String,
+    enum: ['admin', 'tenant_admin', 'customer_user'],
+    default: 'customer_user'
+  },
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tenant',
+    required: function() {
+      return this.role !== 'admin';
+    }
+  },
+  customerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Customer',
+    required: function() {
+      return this.role === 'customer_user';
+    }
+  },
+  phone: {
     type: String,
     trim: true
   },
-  status: {
-    type: String,
-    enum: ['online', 'offline', 'error', 'maintenance'],
-    default: 'offline'
+  avatar: {
+    type: String
   },
-  lastConnected: {
+  settings: {
+    type: Object,
+    default: {}
+  },
+  active: {
+    type: Boolean,
+    default: true
+  },
+  lastLoginTime: {
     type: Date
   },
-  modbusConfig: {
-    unitId: {
-      type: Number,
-      default: 1
-    },
-    timeout: {
-      type: Number,
-      default: 5000 // ms
-    },
-    registers: [{
-      name: {
-        type: String,
-        required: true
-      },
-      address: {
-        type: Number,
-        required: true
-      },
-      type: {
-        type: String,
-        enum: ['holdingRegister', 'inputRegister', 'coil', 'discreteInput'],
-        default: 'holdingRegister'
-      },
-      dataType: {
-        type: String,
-        enum: ['int16', 'uint16', 'int32', 'uint32', 'float', 'boolean'],
-        default: 'int16'
-      },
-      scaling: {
-        type: Number,
-        default: 1
-      },
-      description: String
-    }]
+  failedLoginAttempts: {
+    type: Number,
+    default: 0
   },
-  owner: {
-    type: mongoose.Schema.ObjectId,
-    ref: 'User',
-    required: true
+  activationToken: {
+    type: String
   },
-  createdAt: {
-    type: Date,
-    default: Date.now
+  activationTokenExpiresAt: {
+    type: Date
+  },
+  resetPasswordToken: {
+    type: String
+  },
+  resetPasswordTokenExpiresAt: {
+    type: Date
   }
+}, {
+  timestamps: true
 });
 
-// Index for faster queries
-DeviceSchema.index({ owner: 1, ipAddress: 1 });
+// Hash password before saving
+UserSchema.pre('save', async function(next) {
+  if (this.isModified('password')) {
+    this.password = await bcrypt.hash(this.password, config.passwordSaltRounds);
+  }
+  next();
+});
 
-module.exports = mongoose.model('Device', DeviceSchema);
+// Method to compare password
+UserSchema.methods.comparePassword = async function(candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
+
+// Method to return user object without sensitive information
+UserSchema.methods.toJSON = function() {
+  const user = this.toObject();
+  delete user.password;
+  delete user.activationToken;
+  delete user.activationTokenExpiresAt;
+  delete user.resetPasswordToken;
+  delete user.resetPasswordTokenExpiresAt;
+  delete user.failedLoginAttempts;
+  return user;
+};
+
+const User = mongoose.model('User', UserSchema);
+
+module.exports = User;
