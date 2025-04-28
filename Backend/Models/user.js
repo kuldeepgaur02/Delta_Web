@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
-const config = require('../config/default');
+const config = require('../Config/default');
 
 const UserSchema = new mongoose.Schema({
   username: {

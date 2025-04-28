@@ -1,93 +1,185 @@
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 
 const DeviceSchema = new mongoose.Schema({
   name: {
     type: String,
-    required: [true, 'Please add a device name'],
-    trim: true,
-    maxlength: [100, 'Name cannot be more than 100 characters']
-  },
-  ipAddress: {
-    type: String,
-    required: [true, 'Please add an IP address'],
-    match: [/^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/, 'Please add a valid IP address']
-  },
-  port: {
-    type: Number,
-    required: [true, 'Please add a port number'],
-    default: 502, // Default Modbus TCP port
-    min: [1, 'Port must be at least 1'],
-    max: [65535, 'Port must be at most 65535']
+    required: true,
+    trim: true
   },
   type: {
     type: String,
-    enum: ['water_treatment', 'hvac', 'manufacturing', 'energy', 'other'],
-    required: [true, 'Please specify the PLC application type']
+    required: true,
+    trim: true
   },
-  description: {
-    type: String,
-    trim: true,
-    maxlength: [500, 'Description cannot be more than 500 characters']
-  },
-  location: {
+  label: {
     type: String,
     trim: true
   },
-  status: {
-    type: String,
-    enum: ['online', 'offline', 'error', 'maintenance'],
-    default: 'offline'
-  },
-  lastConnected: {
-    type: Date
-  },
-  modbusConfig: {
-    unitId: {
-      type: Number,
-      default: 1
-    },
-    timeout: {
-      type: Number,
-      default: 5000 // ms
-    },
-    registers: [{
-      name: {
-        type: String,
-        required: true
-      },
-      address: {
-        type: Number,
-        required: true
-      },
-      type: {
-        type: String,
-        enum: ['holdingRegister', 'inputRegister', 'coil', 'discreteInput'],
-        default: 'holdingRegister'
-      },
-      dataType: {
-        type: String,
-        enum: ['int16', 'uint16', 'int32', 'uint32', 'float', 'boolean'],
-        default: 'int16'
-      },
-      scaling: {
-        type: Number,
-        default: 1
-      },
-      description: String
-    }]
-  },
-  owner: {
-    type: mongoose.Schema.ObjectId,
-    ref: 'User',
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tenant',
     required: true
   },
-  createdAt: {
-    type: Date,
-    default: Date.now
+  customerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Customer'
+  },
+  accessToken: {
+    type: String,
+    unique: true,
+    required: true
+  },
+  deviceProfileId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'DeviceProfile'
+  },
+  additionalInfo: {
+    type: Object,
+    default: {}
+  },
+  firmware: {
+    version: {
+      type: String,
+      default: '1.0.0'
+    },
+    lastUpdateTime: {
+      type: Date
+    },
+    updateStatus: {
+      type: String,
+      enum: ['up_to_date', 'update_available', 'updating', 'update_failed'],
+      default: 'up_to_date'
+    }
+  },
+  status: {
+    active: {
+      type: Boolean,
+      default: true
+    },
+    lastActivityTime: {
+      type: Date
+    },
+    lastConnectedTime: {
+      type: Date
+    },
+    lastDisconnectedTime: {
+      type: Date
+    },
+    online: {
+      type: Boolean,
+      default: false
+    }
+  },
+  attributes: {
+    server: {
+      type: Map,
+      of: mongoose.Schema.Types.Mixed,
+      default: new Map()
+    },
+    client: {
+      type: Map,
+      of: mongoose.Schema.Types.Mixed,
+      default: new Map()
+    },
+    shared: {
+      type: Map,
+      of: mongoose.Schema.Types.Mixed,
+      default: new Map()
+    }
+  },
+  transportConfiguration: {
+    type: {
+      type: String,
+      enum: ['mqtt', 'http', 'coap'],
+      default: 'mqtt'
+    },
+    mqttConfig: {
+      topicFormat: {
+        type: String,
+        default: 'v1/devices/{deviceId}/{msgType}'
+      }
+    },
+    httpConfig: {
+      endpoint: String
+    }
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   }
+}, {
+  timestamps: true
 });
 
-// Index for faster queries
-DeviceSchema.index({ owner: 1, ipAddress: 1 });
+// Index for efficient querying
+DeviceSchema.index({ tenantId: 1, name: 1 }, { unique: true });
+DeviceSchema.index({ accessToken: 1 }, { unique: true });
 
-module.exports = mongoose.model('Device', DeviceSchema);
+// Generate a unique access token before saving if not provided
+DeviceSchema.pre('save', function(next) {
+  if (!this.accessToken) {
+    this.accessToken = crypto.randomBytes(20).toString('hex');
+  }
+  next();
+});
+
+// Set lastActivityTime whenever device data is updated
+DeviceSchema.pre('save', function(next) {
+  this.status.lastActivityTime = new Date();
+  next();
+});
+
+// Virtual for full device info
+DeviceSchema.virtual('fullInfo').get(function() {
+  return {
+    id: this._id,
+    name: this.name,
+    type: this.type,
+    label: this.label,
+    tenantId: this.tenantId,
+    customerId: this.customerId,
+    status: this.status,
+    firmware: this.firmware,
+    attributes: {
+      server: Object.fromEntries(this.attributes.server),
+      client: Object.fromEntries(this.attributes.client),
+      shared: Object.fromEntries(this.attributes.shared)
+    },
+    transportConfiguration: this.transportConfiguration,
+    additionalInfo: this.additionalInfo,
+    createdAt: this.createdAt,
+    updatedAt: this.updatedAt
+  };
+});
+
+// Method to update device status to online
+DeviceSchema.methods.connect = function() {
+  this.status.online = true;
+  this.status.lastConnectedTime = new Date();
+  return this.save();
+};
+
+// Method to update device status to offline
+DeviceSchema.methods.disconnect = function() {
+  this.status.online = false;
+  this.status.lastDisconnectedTime = new Date();
+  return this.save();
+};
+
+// Method to update device attributes
+DeviceSchema.methods.updateAttributes = function(scope, attributes) {
+  if (!this.attributes[scope]) {
+    throw new Error(`Invalid attribute scope: ${scope}`);
+  }
+  
+  for (const [key, value] of Object.entries(attributes)) {
+    this.attributes[scope].set(key, value);
+  }
+  
+  return this.save();
+};
+
+const Device = mongoose.model('Device', DeviceSchema);
+
+module.exports = Device;
