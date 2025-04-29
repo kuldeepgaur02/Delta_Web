@@ -1,120 +1,82 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt');
-const config = require('../Config/default');
+const bcrypt = require('bcryptjs');
 
 const UserSchema = new mongoose.Schema({
-  username: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true,
-    minlength: 3
-  },
   email: {
     type: String,
     required: true,
     unique: true,
     trim: true,
-    lowercase: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email address']
+    lowercase: true
   },
   password: {
     type: String,
-    required: true,
-    minlength: 6
+    required: true
   },
   firstName: {
     type: String,
-    required: true,
-    trim: true
+    required: true
   },
   lastName: {
     type: String,
-    required: true,
-    trim: true
+    required: true
   },
   role: {
     type: String,
-    enum: ['admin', 'tenant_admin', 'customer_user'],
-    default: 'customer_user'
+    enum: ['admin', 'user', 'tenant_admin'],
+    default: 'user'
   },
   tenantId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Tenant',
-    required: function() {
-      return this.role !== 'admin';
-    }
+    default: null
   },
-  customerId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Customer',
-    required: function() {
-      return this.role === 'customer_user';
-    }
+  createdAt: {
+    type: Date,
+    default: Date.now
   },
-  phone: {
-    type: String,
-    trim: true
-  },
-  avatar: {
-    type: String
-  },
-  settings: {
-    type: Object,
-    default: {}
-  },
-  active: {
-    type: Boolean,
-    default: true
+  updatedAt: {
+    type: Date,
+    default: Date.now
   },
   lastLoginTime: {
     type: Date
   },
-  failedLoginAttempts: {
-    type: Number,
-    default: 0
-  },
-  activationToken: {
-    type: String
-  },
-  activationTokenExpiresAt: {
-    type: Date
-  },
-  resetPasswordToken: {
-    type: String
-  },
-  resetPasswordTokenExpiresAt: {
-    type: Date
+  active: {
+    type: Boolean,
+    default: true
   }
-}, {
-  timestamps: true
 });
 
-// Hash password before saving
+// Pre-save hook to hash password
 UserSchema.pre('save', async function(next) {
-  if (this.isModified('password')) {
-    this.password = await bcrypt.hash(this.password, config.passwordSaltRounds);
+  // Only hash the password if it's modified or new
+  if (!this.isModified('password')) return next();
+  
+  try {
+    // Generate salt
+    const salt = await bcrypt.genSalt(10);
+    // Hash password
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (error) {
+    next(error);
   }
-  next();
 });
 
 // Method to compare password
 UserSchema.methods.comparePassword = async function(candidatePassword) {
-  return bcrypt.compare(candidatePassword, this.password);
+  return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Method to return user object without sensitive information
-UserSchema.methods.toJSON = function() {
-  const user = this.toObject();
-  delete user.password;
-  delete user.activationToken;
-  delete user.activationTokenExpiresAt;
-  delete user.resetPasswordToken;
-  delete user.resetPasswordTokenExpiresAt;
-  delete user.failedLoginAttempts;
-  return user;
-};
+// Update timestamp on document update
+UserSchema.pre('findOneAndUpdate', function() {
+  this.set({ updatedAt: Date.now() });
+});
 
-const User = mongoose.model('User', UserSchema);
+// Virtual for full name
+UserSchema.virtual('fullName').get(function() {
+  return `${this.firstName} ${this.lastName}`;
+});
 
-module.exports = User;
+module.exports = mongoose.model('User', UserSchema);
