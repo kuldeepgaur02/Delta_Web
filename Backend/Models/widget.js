@@ -1,103 +1,65 @@
 const mongoose = require('mongoose');
 
 const WidgetSchema = new mongoose.Schema({
-  tenantId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Tenant',
-    required: true
-  },
-  bundleAlias: {
-    type: String,
-    required: true
-  },
-  typeAlias: {
-    type: String,
-    required: true
-  },
   title: {
     type: String,
+    required: true,
+    trim: true
+  },
+  type: {
+    type: String,
+    required: true,
+    enum: [
+      'line_chart', 'bar_chart', 'pie_chart', 'gauge', 'card', 
+      'value_display', 'table', 'map', 'device_status', 
+      'alarm_table', 'rpc_control', 'html', 'custom'
+    ]
+  },
+  dashboardId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Dashboard',
     required: true
-  },
-  subtitle: {
-    type: String
-  },
-  image: {
-    type: String
-  },
-  description: {
-    type: String
   },
   config: {
     type: mongoose.Schema.Types.Mixed,
     required: true
   },
+  layout: {
+    x: { type: Number, default: 0 },
+    y: { type: Number, default: 0 },
+    w: { type: Number, default: 6 },
+    h: { type: Number, default: 4 },
+    static: { type: Boolean, default: false }
+  },
+  dataSources: [{
+    type: { 
+      type: String, 
+      enum: ['device', 'function', 'static'],
+      required: true 
+    },
+    deviceId: { type: String },
+    keys: { type: [String] },
+    dataKeys: { type: [String] },
+    funcBody: { type: String },
+    staticData: { type: mongoose.Schema.Types.Mixed }
+  }],
   settings: {
     type: mongoose.Schema.Types.Mixed,
     default: {}
   },
-  isSystemType: {
-    type: Boolean,
-    default: false
+  createdAt: {
+    type: Date,
+    default: Date.now
   },
-  deprecated: {
-    type: Boolean,
-    default: false
-  },
-  type: {
-    type: String,
-    enum: [
-      'latest', 'time-series', 'rpc', 'alarm', 'static',
-      'map', 'timeseries-table', 'device-state', 'chart'
-    ],
-    required: true
-  },
-  datasources: [{
-    type: {
-      type: String,
-      enum: ['device', 'function', 'entity'],
-      required: true
-    },
-    deviceId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Device'
-    },
-    entityId: {
-      type: mongoose.Schema.Types.ObjectId
-    },
-    entityType: {
-      type: String,
-      enum: ['DEVICE', 'ASSET', 'ENTITY_VIEW', 'TENANT', 'CUSTOMER', 'USER', 'DASHBOARD']
-    },
-    dataKeys: [{
-      name: {
-        type: String,
-        required: true
-      },
-      type: {
-        type: String,
-        enum: ['timeseries', 'attribute', 'function', 'alarm'],
-        required: true
-      },
-      label: String,
-      color: String,
-      funcBody: String,
-      settings: {
-        type: mongoose.Schema.Types.Mixed,
-        default: {}
-      }
-    }]
-  }],
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+  updatedAt: {
+    type: Date,
+    default: Date.now
   }
-}, {
-  timestamps: true
 });
 
-// Index for efficient querying
-WidgetSchema.index({ tenantId: 1, bundleAlias: 1, typeAlias: 1 });
+// Update timestamp on document update
+WidgetSchema.pre('findOneAndUpdate', function() {
+  this.set({ updatedAt: Date.now() });
+});
 
-const Widget = mongoose.model('Widget', WidgetSchema);
-
-module.exports = Widget;
+module.exports = mongoose.model('Widget', WidgetSchema);
