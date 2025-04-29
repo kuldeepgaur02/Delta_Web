@@ -1,48 +1,30 @@
 const config = require('./default');
 
-// MQTT topic formats
-const MQTT_TOPICS = {
-  // Device telemetry topic format: v1/devices/{deviceId}/telemetry
-  TELEMETRY: 'v1/devices/+/telemetry',
-  // Device attributes topic format: v1/devices/{deviceId}/attributes
-  ATTRIBUTES: 'v1/devices/+/attributes',
-  // Device commands topic format: v1/devices/{deviceId}/commands
-  COMMANDS: 'v1/devices/+/commands',
-  // Device command responses topic format: v1/devices/{deviceId}/commands/response
-  COMMAND_RESPONSES: 'v1/devices/+/commands/response'
-};
-
-// Helper functions for constructing specific MQTT topics
-const createDeviceTelemetryTopic = (deviceId) => `v1/devices/${deviceId}/telemetry`;
-const createDeviceAttributesTopic = (deviceId) => `v1/devices/${deviceId}/attributes`;
-const createDeviceCommandsTopic = (deviceId) => `v1/devices/${deviceId}/commands`;
-const createDeviceCommandResponseTopic = (deviceId) => `v1/devices/${deviceId}/commands/response`;
-
-// Parse device ID from topic
-const parseDeviceIdFromTopic = (topic) => {
-  const parts = topic.split('/');
-  if (parts.length >= 3 && parts[0] === 'v1' && parts[1] === 'devices') {
-    return parts[2];
-  }
-  return null;
-};
-
-// Parse message type from topic
-const parseMessageTypeFromTopic = (topic) => {
-  const parts = topic.split('/');
-  if (parts.length >= 4 && parts[0] === 'v1' && parts[1] === 'devices') {
-    return parts[3];
-  }
-  return null;
-};
-
 module.exports = {
-  mqttOptions: config.mqttOptions,
-  topics: MQTT_TOPICS,
-  createDeviceTelemetryTopic,
-  createDeviceAttributesTopic,
-  createDeviceCommandsTopic,
-  createDeviceCommandResponseTopic,
-  parseDeviceIdFromTopic,
-  parseMessageTypeFromTopic
+  // MQTT client options
+  clientOptions: {
+    clientId: config.mqtt.clientId,
+    clean: config.mqtt.clean,
+    connectTimeout: config.mqtt.connectTimeout,
+    reconnectPeriod: config.mqtt.reconnectPeriod,
+    username: config.mqtt.username,
+    password: config.mqtt.password
+  },
+  
+  // MQTT topics
+  topics: {
+    deviceTelemetry: 'v1/devices/+/telemetry',  // For device telemetry data
+    deviceAttributes: 'v1/devices/+/attributes', // For device attributes
+    deviceStatus: 'v1/devices/+/status',        // For device status updates
+    deviceCommands: 'v1/devices/+/commands',    // For sending commands to devices
+    deviceResponses: 'v1/devices/+/responses'   // For receiving responses from devices
+  },
+  
+  // MQTT QoS levels
+  qos: {
+    telemetry: 0,  // At most once delivery
+    attributes: 1, // At least once delivery
+    commands: 1,   // At least once delivery
+    status: 1      // At least once delivery
+  }
 };
