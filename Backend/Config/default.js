@@ -1,50 +1,42 @@
+const dotenv = require('dotenv');
+dotenv.config();
+
 module.exports = {
-  port: process.env.PORT || 3000,
-  mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/iot-platform',
-  jwtSecret: process.env.JWT_SECRET || 'your-secret-key',
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
-  corsOrigins: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : ['http://localhost:3000', 'http://localhost:8080'],
-  logLevel: process.env.LOG_LEVEL || 'info',
-  passwordSaltRounds: 10,
-  telemetryRetentionDays: 30,
-  mqttOptions: {
-    host: process.env.MQTT_HOST || 'localhost',
-    port: parseInt(process.env.MQTT_PORT || '1883'),
-    clientId: `iot-platform-server-${Math.random().toString(16).substr(2, 8)}`,
-    username: process.env.MQTT_USERNAME,
-    password: process.env.MQTT_PASSWORD,
-    protocol: process.env.MQTT_PROTOCOL || 'mqtt',
-    keepalive: 60,
-    reconnectPeriod: 1000,
-    clean: true
+  server: {
+    port: process.env.PORT || 3000,
+    env: process.env.NODE_ENV || 'development'
   },
-  deviceAccessTokenLength: 20,
-  defaultAdminUser: {
-    username: process.env.ADMIN_USERNAME || 'admin',
-    password: process.env.ADMIN_PASSWORD || 'admin123',
-    email: process.env.ADMIN_EMAIL || 'admin@example.com',
-    firstName: 'Admin',
-    lastName: 'User',
-    role: 'admin'
-  },
-  timeSeriesDb: {
-    type: process.env.TIMESERIES_DB_TYPE || 'mongodb', // Options: 'mongodb', 'influxdb', 'timescaledb'
-    influxDb: {
-      url: process.env.INFLUXDB_URL || 'http://localhost:8086',
-      token: process.env.INFLUXDB_TOKEN,
-      org: process.env.INFLUXDB_ORG || 'iot-platform',
-      bucket: process.env.INFLUXDB_BUCKET || 'device-telemetry'
+  database: {
+    url: process.env.MONGODB_URI || 'mongodb://localhost:27017/iot-platform',
+    options: {
+      useNewUrlParser: true,
+      useUnifiedTopology: true
     }
   },
-  notifications: {
-    email: {
-      enabled: process.env.EMAIL_ENABLED === 'true' || false,
-      service: process.env.EMAIL_SERVICE || 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD
-      },
-      defaultFrom: process.env.EMAIL_FROM || 'no-reply@iot-platform.com'
-    }
+  jwt: {
+    secret: process.env.JWT_SECRET || 'your-secret-key',
+    expiresIn: process.env.JWT_EXPIRES_IN || '24h'
+  },
+  cors: {
+    origin: process.env.CORS_ORIGIN || '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
+  },
+  logging: {
+    level: process.env.LOG_LEVEL || 'info'
+  },
+  mqtt: {
+    broker: process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883',
+    clientId: process.env.MQTT_CLIENT_ID || `iot-platform-server-${Math.random().toString(16).slice(2, 10)}`,
+    username: process.env.MQTT_USERNAME || '',
+    password: process.env.MQTT_PASSWORD || '',
+    clean: true,
+    connectTimeout: 4000,
+    reconnectPeriod: 1000
+  },
+  telemetry: {
+    retention: {
+      days: process.env.TELEMETRY_RETENTION_DAYS || 30
+    },
+    batchSize: process.env.TELEMETRY_BATCH_SIZE || 1000
   }
 };
