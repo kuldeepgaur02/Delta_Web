@@ -1,254 +1,148 @@
 const mongoose = require('mongoose');
 
 const TelemetrySchema = new mongoose.Schema({
-  entityId: {
-    type: mongoose.Schema.Types.ObjectId,
-    required: true
-  },
-  entityType: {
+  deviceId: {
     type: String,
-    enum: ['DEVICE', 'ASSET', 'ENTITY_VIEW', 'TENANT', 'CUSTOMER', 'USER', 'DASHBOARD'],
-    required: true
+    required: true,
+    index: true
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now,
+    index: true
   },
   key: {
     type: String,
-    required: true
+    required: true,
+    index: true
   },
   value: {
     type: mongoose.Schema.Types.Mixed,
     required: true
-  },
-  ts: {
-    type: Number,
-    required: true,
-    default: () => Date.now()
   }
 }, {
-  timestamps: true
+  timeseries: {
+    timeField: 'timestamp',
+    metaField: 'deviceId',
+    granularity: 'minutes'
+  }
 });
 
-// Compound index for efficient time-series queries
-TelemetrySchema.index({ entityId: 1, entityType: 1, key: 1, ts: -1 });
+// Create compound index for efficient querying
+TelemetrySchema.index({ deviceId: 1, key: 1, timestamp: -1 });
 
-// Expire data after the configured retention period
-// Note: TTL index runs as a background task approximately once per minute
-TelemetrySchema.index({ createdAt: 1 }, { 
-  expireAfterSeconds: 60 * 60 * 24 * 30 // 30 days by default 
-});
-
-// Static method to save batch telemetry
-TelemetrySchema.statics.saveBatch = async function(entityId, entityType, telemetry) {
-  const batch = [];
-  for (const key in telemetry) {
-    if (Object.prototype.hasOwnProperty.call(telemetry, key)) {
-      const values = Array.isArray(telemetry[key]) ? telemetry[key] : [telemetry[key]];
-      for (const item of values) {
-        let ts = Date.now();
-        let value = item;
-        
-        if (typeof item === 'object' && item !== null) {
-          if (item.ts) {
-            ts = item.ts;
-          }
-          if (item.value !== undefined) {
-            value = item.value;
-          }
-        }
-        
-        batch.push({
-          entityId,
-          entityType,
-          key,
-          value,
-          ts
-        });
-      }
-    }
+// Static method to batch insert telemetry
+TelemetrySchema.statics.insertBatch = async function(telemetryArray) {
+  if (!Array.isArray(telemetryArray) || telemetryArray.length === 0) {
+    return [];
   }
   
-  return this.insertMany(batch);
+  return await this.insertMany(telemetryArray);
 };
 
-// Static method to get latest telemetry
-TelemetrySchema.statics.getLatest = async function(entityId, entityType, keys) {
-  const result = {};
-  const keyArray = Array.isArray(keys) ? keys : [keys];
+// Static method to query latest telemetry for a device
+TelemetrySchema.statics.getLatest = async function(deviceId, keys = []) {
+  const query = { deviceId };
   
-  const latestValues = await this.aggregate([
-    {
-      $match: {
-        entityId: mongoose.Types.ObjectId(entityId),
-        entityType,
-        key: { $in: keyArray }
-      }
-    },
-    {
-      $sort: { ts: -1 }
-    },
+  if (keys.length > 0) {
+    query.key = { $in: keys };
+  }
+  
+  const pipeline = [
+    { $match: query },
+    { $sort: { timestamp: -1 } },
     {
       $group: {
-        _id: "$key",
-        value: { $first: "$value" },
-        ts: { $first: "$ts" }
+        _id: '$key',
+        value: { $first: '$value' },
+        timestamp: { $first: '$timestamp' }
+      }
+    },
+    {
+      $project: {
+        _id: 0,
+        key: '$_id',
+        value: 1,
+        timestamp: 1
       }
     }
-  ]);
+  ];
   
-  latestValues.forEach(item => {
-    result[item._id] = [{ ts: item.ts, value: item.value }];
-  });
-  
-  return result;
+  return await this.aggregate(pipeline);
 };
-// Static method to get time series data
-TelemetrySchema.statics.getTimeseries = async function(entityId, entityType, keys, startTs, endTs, limit, agg) {
-    const keyArray = Array.isArray(keys) ? keys : [keys];
-    const query = {
-      entityId: mongoose.Types.ObjectId(entityId),
-      entityType,
-      key: { $in: keyArray }
-    };
-    
-    if (startTs || endTs) {
-      query.ts = {};
-      if (startTs) {
-        query.ts.$gte = startTs;
-      }
-      if (endTs) {
-        query.ts.$lte = endTs;
-      }
-    }
-    
-    // If aggregation is requested
-    if (agg && agg !== 'NONE') {
-      const interval = Math.floor((endTs - startTs) / limit);
-      if (interval > 0) {
-        const aggregationPipeline = [
-          { $match: query },
-          { $sort: { ts: 1 } },
-          { 
-            $group: {
-              _id: {
-                key: "$key",
-                interval: { 
-                  $floor: { 
-                    $divide: [
-                      { $subtract: ["$ts", startTs] }, 
-                      interval
-                    ] 
-                  }
-                }
-              },
-              ts: { $first: "$ts" },
-              // Apply the requested aggregation function
-              value: getAggregationOperator(agg)
-            }
-          },
-          { $sort: { "_id.interval": 1 } },
-          { $limit: limit }
-        ];
-        
-        const result = {};
-        const aggregatedData = await this.aggregate(aggregationPipeline);
-        
-        aggregatedData.forEach(item => {
-          if (!result[item._id.key]) {
-            result[item._id.key] = [];
-          }
-          result[item._id.key].push({
-            ts: item.ts,
-            value: item.value
-          });
-        });
-        
-        return result;
-      }
-    }
-    
-    // No aggregation, retrieve raw data with limit
-    const result = {};
-    for (const key of keyArray) {
-      const data = await this.find({
-        ...query,
-        key
-      }).sort({ ts: -1 }).limit(limit);
-      
-      result[key] = data.map(item => ({
-        ts: item.ts,
-        value: item.value
-      }));
-    }
-    
-    return result;
+
+// Static method to get telemetry history for a device
+TelemetrySchema.statics.getHistory = async function(deviceId, key, startTime, endTime, interval = 'hour', limit = 1000) {
+  const query = {
+    deviceId,
+    key,
+    timestamp: { $gte: new Date(startTime), $lte: new Date(endTime) }
   };
   
-  // Helper function to get the aggregation operator based on the aggregation type
-  function getAggregationOperator(aggType) {
-    switch (aggType) {
-      case 'AVG':
-        return { $avg: "$value" };
-      case 'SUM':
-        return { $sum: "$value" };
-      case 'MIN':
-        return { $min: "$value" };
-      case 'MAX':
-        return { $max: "$value" };
-      case 'COUNT':
-        return { $sum: 1 };
-      case 'NONE':
-      default:
-        return { $first: "$value" };
-    }
+  let timeGroup;
+  
+  // Define time grouping based on interval
+  switch(interval) {
+    case 'minute':
+      timeGroup = {
+        year: { $year: '$timestamp' },
+        month: { $month: '$timestamp' },
+        day: { $dayOfMonth: '$timestamp' },
+        hour: { $hour: '$timestamp' },
+        minute: { $minute: '$timestamp' }
+      };
+      break;
+    case 'hour':
+      timeGroup = {
+        year: { $year: '$timestamp' },
+        month: { $month: '$timestamp' },
+        day: { $dayOfMonth: '$timestamp' },
+        hour: { $hour: '$timestamp' }
+      };
+      break;
+    case 'day':
+      timeGroup = {
+        year: { $year: '$timestamp' },
+        month: { $month: '$timestamp' },
+        day: { $dayOfMonth: '$timestamp' }
+      };
+      break;
+    default:
+      timeGroup = {
+        year: { $year: '$timestamp' },
+        month: { $month: '$timestamp' },
+        day: { $dayOfMonth: '$timestamp' },
+        hour: { $hour: '$timestamp' }
+      };
   }
   
-  // Static method to delete telemetry
-  TelemetrySchema.statics.deleteTelemetry = async function(entityId, entityType, keys, startTs, endTs) {
-    const query = {
-      entityId: mongoose.Types.ObjectId(entityId),
-      entityType
-    };
-    
-    if (keys && keys.length > 0) {
-      query.key = { $in: Array.isArray(keys) ? keys : [keys] };
-    }
-    
-    if (startTs || endTs) {
-      query.ts = {};
-      if (startTs) {
-        query.ts.$gte = startTs;
+  const pipeline = [
+    { $match: query },
+    {
+      $group: {
+        _id: timeGroup,
+        avg: { $avg: { $toDouble: '$value' } },
+        min: { $min: { $toDouble: '$value' } },
+        max: { $max: { $toDouble: '$value' } },
+        count: { $sum: 1 },
+        timestamp: { $min: '$timestamp' }
       }
-      if (endTs) {
-        query.ts.$lte = endTs;
+    },
+    { $sort: { timestamp: 1 } },
+    { $limit: limit },
+    {
+      $project: {
+        _id: 0,
+        timestamp: 1,
+        avg: 1,
+        min: 1,
+        max: 1,
+        count: 1
       }
     }
-    
-    return this.deleteMany(query);
-  };
+  ];
   
-  // Static method to count telemetry entries
-  TelemetrySchema.statics.countTelemetry = async function(entityId, entityType, keys, startTs, endTs) {
-    const query = {
-      entityId: mongoose.Types.ObjectId(entityId),
-      entityType
-    };
-    
-    if (keys && keys.length > 0) {
-      query.key = { $in: Array.isArray(keys) ? keys : [keys] };
-    }
-    
-    if (startTs || endTs) {
-      query.ts = {};
-      if (startTs) {
-        query.ts.$gte = startTs;
-      }
-      if (endTs) {
-        query.ts.$lte = endTs;
-      }
-    }
-    
-    return this.countDocuments(query);
-  };
-  
-  const Telemetry = mongoose.model('Telemetry', TelemetrySchema);
-  
-  module.exports = Telemetry;
+  return await this.aggregate(pipeline);
+};
+
+module.exports = mongoose.model('Telemetry', TelemetrySchema);
