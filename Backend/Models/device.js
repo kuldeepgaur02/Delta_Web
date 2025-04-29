@@ -1,11 +1,17 @@
 const mongoose = require('mongoose');
-const crypto = require('crypto');
+const { v4: uuidv4 } = require('uuid');
 
 const DeviceSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
     trim: true
+  },
+  deviceId: {
+    type: String,
+    required: true,
+    unique: true,
+    default: () => uuidv4()
   },
   type: {
     type: String,
@@ -16,170 +22,86 @@ const DeviceSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  ownerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
   tenantId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Tenant',
-    required: true
+    default: null
   },
-  customerId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Customer'
-  },
-  accessToken: {
-    type: String,
-    unique: true,
-    required: true
-  },
-  deviceProfileId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'DeviceProfile'
-  },
-  additionalInfo: {
-    type: Object,
-    default: {}
-  },
-  firmware: {
-    version: {
+  credentials: {
+    accessToken: {
       type: String,
-      default: '1.0.0'
+      default: () => uuidv4()
     },
-    lastUpdateTime: {
-      type: Date
-    },
-    updateStatus: {
+    refreshToken: {
       type: String,
-      enum: ['up_to_date', 'update_available', 'updating', 'update_failed'],
-      default: 'up_to_date'
-    }
-  },
-  status: {
-    active: {
-      type: Boolean,
-      default: true
+      default: () => uuidv4()
     },
-    lastActivityTime: {
-      type: Date
-    },
-    lastConnectedTime: {
-      type: Date
-    },
-    lastDisconnectedTime: {
-      type: Date
-    },
-    online: {
-      type: Boolean,
-      default: false
+    expiresAt: {
+      type: Date,
+      default: () => new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 1 year from now
     }
   },
   attributes: {
-    server: {
-      type: Map,
-      of: mongoose.Schema.Types.Mixed,
-      default: new Map()
-    },
-    client: {
-      type: Map,
-      of: mongoose.Schema.Types.Mixed,
-      default: new Map()
-    },
-    shared: {
-      type: Map,
-      of: mongoose.Schema.Types.Mixed,
-      default: new Map()
-    }
+    type: Map,
+    of: mongoose.Schema.Types.Mixed,
+    default: {}
   },
-  transportConfiguration: {
-    type: {
-      type: String,
-      enum: ['mqtt', 'http', 'coap'],
-      default: 'mqtt'
-    },
-    mqttConfig: {
-      topicFormat: {
-        type: String,
-        default: 'v1/devices/{deviceId}/{msgType}'
-      }
-    },
-    httpConfig: {
-      endpoint: String
-    }
+  lastActivity: {
+    type: Date
   },
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+  status: {
+    type: String,
+    enum: ['active', 'inactive', 'suspended'],
+    default: 'inactive'
+  },
+  firmwareVersion: {
+    type: String
+  },
+  softwareVersion: {
+    type: String
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
   }
 }, {
-  timestamps: true
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
-// Index for efficient querying
-DeviceSchema.index({ tenantId: 1, name: 1 }, { unique: true });
-DeviceSchema.index({ accessToken: 1 }, { unique: true });
-
-// Generate a unique access token before saving if not provided
-DeviceSchema.pre('save', function(next) {
-  if (!this.accessToken) {
-    this.accessToken = crypto.randomBytes(20).toString('hex');
-  }
-  next();
+// Update timestamp on document update
+DeviceSchema.pre('findOneAndUpdate', function() {
+  this.set({ updatedAt: Date.now() });
 });
 
-// Set lastActivityTime whenever device data is updated
-DeviceSchema.pre('save', function(next) {
-  this.status.lastActivityTime = new Date();
-  next();
-});
-
-// Virtual for full device info
-DeviceSchema.virtual('fullInfo').get(function() {
-  return {
-    id: this._id,
-    name: this.name,
-    type: this.type,
-    label: this.label,
-    tenantId: this.tenantId,
-    customerId: this.customerId,
-    status: this.status,
-    firmware: this.firmware,
-    attributes: {
-      server: Object.fromEntries(this.attributes.server),
-      client: Object.fromEntries(this.attributes.client),
-      shared: Object.fromEntries(this.attributes.shared)
-    },
-    transportConfiguration: this.transportConfiguration,
-    additionalInfo: this.additionalInfo,
-    createdAt: this.createdAt,
-    updatedAt: this.updatedAt
-  };
-});
-
-// Method to update device status to online
-DeviceSchema.methods.connect = function() {
-  this.status.online = true;
-  this.status.lastConnectedTime = new Date();
-  return this.save();
+// Method to generate new access token
+DeviceSchema.methods.generateAccessToken = function() {
+  this.credentials.accessToken = uuidv4();
+  return this.credentials.accessToken;
 };
 
-// Method to update device status to offline
-DeviceSchema.methods.disconnect = function() {
-  this.status.online = false;
-  this.status.lastDisconnectedTime = new Date();
+// Method to update device status
+DeviceSchema.methods.updateStatus = function(status) {
+  this.status = status;
+  this.lastActivity = Date.now();
   return this.save();
 };
 
 // Method to update device attributes
-DeviceSchema.methods.updateAttributes = function(scope, attributes) {
-  if (!this.attributes[scope]) {
-    throw new Error(`Invalid attribute scope: ${scope}`);
-  }
-  
+DeviceSchema.methods.updateAttributes = function(attributes) {
   for (const [key, value] of Object.entries(attributes)) {
-    this.attributes[scope].set(key, value);
+    this.attributes.set(key, value);
   }
-  
   return this.save();
 };
 
-const Device = mongoose.model('Device', DeviceSchema);
-
-module.exports = Device;
+module.exports = mongoose.model('Device', DeviceSchema);
